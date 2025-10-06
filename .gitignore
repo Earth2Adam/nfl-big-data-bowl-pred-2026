@@ -1,4 +1,5 @@
 data/
 .DS_store
 .__pycache__
+.ipynb
 .ipynb_checkpoints

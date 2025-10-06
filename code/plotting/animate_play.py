@@ -13,72 +13,75 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import pandas as pd
 import numpy as np
+import sys
+from pathlib import Path
+from custom_assets import colors
 
 pio.renderers.default = (
     "browser"  # modify this to plot on something else besides browser
 )
+
 
 script_dir = Path(__file__).parent  
 data_path = (script_dir / "../../data").resolve()
 
 
 # Modify the variables below to plot your desired play
-data_file = "train/input_2023_w01.csv"
+input_data_loc = "train/input_2023_w01.csv"
+output_data_loc = "train/output_2023_w01.csv"
+
 game_id = 2023090700
 play_id = 101
-
-tracking_file = data_path / data_file
-
 supplementary_file = "supplementary_data.csv"
 
+input_data_file = data_path / input_data_loc
+output_data_file = data_path / output_data_loc
+info_file = data_path / supplementary_file
 
-# team colors to distinguish between players on plots
-colors = {
-    "ARI": "#97233F",
-    "ATL": "#A71930",
-    "BAL": "#241773",
-    "BUF": "#00338D",
-    "CAR": "#0085CA",
-    "CHI": "#C83803",
-    "CIN": "#FB4F14",
-    "CLE": "#311D00",
-    "DAL": "#003594",
-    "DEN": "#FB4F14",
-    "DET": "#0076B6",
-    "GB": "#203731",
-    "HOU": "#03202F",
-    "IND": "#002C5F",
-    "JAX": "#9F792C",
-    "KC": "#E31837",
-    "LA": "#FFA300",
-    "LAC": "#0080C6",
-    "LV": "#000000",
-    "MIA": "#008E97",
-    "MIN": "#4F2683",
-    "NE": "#002244",
-    "NO": "#D3BC8D",
-    "NYG": "#0B2265",
-    "NYJ": "#125740",
-    "PHI": "#004C54",
-    "PIT": "#FFB612",
-    "SEA": "#69BE28",
-    "SF": "#AA0000",
-    "TB": "#D50A0A",
-    "TEN": "#4B92DB",
-    "WAS": "#5A1414",
-    "football": "#CBB67C",
-    "tackle": "#FFC0CB",
-}
+df_input = pd.read_csv(input_data_file)
+df_output = pd.read_csv(output_data_file)
+df_plays = pd.read_csv(info_file)
 
-# Handle Data I/O
-df_tracking = pd.read_csv(tracking_file)
-df_plays = pd.read_csv(supplementary_file)
 
-df_full_tracking = df_tracking.merge(df_plays, on=["gameId", "playId"])
+df_input_merged = df_input.merge(df_plays, on=["game_id", "play_id"])
+df_output_merged = df_output.merge(df_plays, on=["game_id", "play_id"])
 
-df_focused = df_full_tracking[
-    (df_full_tracking["playId"] == play_id) & (df_full_tracking["gameId"] == game_id)
+
+drop_list = ['penalty_yards',
+       'pre_penalty_yards_gained', 'yards_gained', 'expected_points',
+       'expected_points_added', 'pre_snap_home_team_win_probability',
+       'pre_snap_visitor_team_win_probability',
+       'home_team_win_probability_added', 'visitor_team_win_probility_added', 'play_nullified_by_penalty']
+
+df_input_final = df_input_merged.drop(drop_list, axis=1)
+df_output_merged = df_output_merged.drop(drop_list, axis=1)
+
+# Create a mapping of player roles from pre-pass data
+# Each player has one role per play
+role_mapping = df_input_final[['game_id', 'play_id', 'nfl_id', 'player_role']].drop_duplicates()
+df_output_final = df_output_merged.merge(
+    role_mapping,
+    on=['game_id', 'play_id', 'nfl_id'],
+    how='left'
+)
+
+df_output_final['player_to_predict'] = True
+
+
+df_input_focused = df_input_final[
+    (df_input_final["play_id"] == play_id) & (df_input_final["game_id"] == game_id)
 ]
+
+df_output_focused = df_output_final[
+    (df_output_final["play_id"] == play_id) & (df_output_final["game_id"] == game_id)
+]
+
+
+# Concat the two dataframes - merge the two segments of the play into one
+pass_frame_id = df_input_focused['frame_id'].max() + 1
+df_output_focused['frame_id'] = df_output_focused['frame_id'] + df_input_focused['frame_id'].max()
+df_focused = pd.concat([df_input_focused, df_output_focused], ignore_index=True)
+
 
 # Get General Play Information
 absolute_yd_line = df_focused.absolute_yardline_number.values[0]
@@ -87,6 +90,11 @@ play_going_right = (
 )  # 0 if left, 1 if right
 
 line_of_scrimmage = absolute_yd_line
+ball_land_x = df_focused.ball_land_x.values[0]
+ball_land_y = df_focused.ball_land_y.values[0]
+
+
+print(f'Play going {"right" if play_going_right else "left"} starting on the {absolute_yd_line} yd line')
 
 # place LOS depending on play direction and absolute_yd_line. 110 because absolute_yd_line includes endzone width
 
@@ -96,11 +104,12 @@ first_down_marker = (
     else (line_of_scrimmage - df_focused.yards_to_go.values[0])
 )  # Calculate 1st down marker
 
+
 down = df_focused.down.values[0]
 quarter = df_focused.quarter.values[0]
 game_clock = df_focused.game_clock.values[0]
 play_description = df_focused.play_description.values[0]
-tackle_frame_id = -1
+
 
 # Handle case where we have a really long Play Description and want to split it into two lines
 if len(play_description.split(" ")) > 15 and len(play_description) > 115:
@@ -113,6 +122,8 @@ if len(play_description.split(" ")) > 15 and len(play_description) > 115:
 print(
     f"Line of Scrimmage: {line_of_scrimmage}, First Down Marker: {first_down_marker}, Down: {down}, Quarter: {quarter}, Game Clock: {game_clock}, Play Description: {play_description}"
 )
+
+
 
 # initialize plotly play and pause buttons for animation
 updatemenus_dict = [
@@ -154,6 +165,8 @@ updatemenus_dict = [
     }
 ]
 
+
+
 # initialize plotly slider to show frame position in animation
 sliders_dict = {
     "active": 0,
@@ -178,6 +191,7 @@ sorted_frame_list = df_focused.frame_id.unique()
 sorted_frame_list.sort()
 
 frames = []
+data_history = []
 for frameId in sorted_frame_list:
     data = []
     # Add Yardline Numbers to Field
@@ -233,69 +247,91 @@ for frameId in sorted_frame_list:
             hoverinfo="none",
         )
     )
-    # Plot Players
-    for club in df_focused.club.unique():
-        plot_df = df_focused[
-            (df_focused.club == club) & (df_focused.frameId == frameId)
-        ].copy()
-        if club != "football":
-            hover_text_array = []
-            for nflId in plot_df.nflId:
-                selected_player_df = plot_df[plot_df.nflId == nflId]
-                hover_text_array.append(
-                    f"nflId:{selected_player_df['nflId'].values[0]}<br>displayName:{selected_player_df['displayName'].values[0]}"
-                )
-            data.append(
-                go.Scatter(
-                    x=plot_df["x"],
-                    y=plot_df["y"],
-                    mode="markers",
-                    marker_color=colors[club],
-                    marker_size=10,
-                    name=club,
-                    hovertext=hover_text_array,
-                    hoverinfo="text",
-                )
-            )
-            if (
-                plot_df.event.values[0] == "tackle"
-                and club == plot_df.possessionTeam.values[0]
-            ):
-                tackle_frame_id = frameId
-                ballcarrier_df = df_focused[
-                    (df_focused.frameId == frameId)
-                ].copy()
-                data.append(
-                    go.Scatter(
-                        x=ballcarrier_df["x"],
-                        y=ballcarrier_df["y"],
-                        mode="markers",
-                        marker_color=colors["tackle"],
-                        marker_size=25,
-                        name="tackle",
-                        hovertext=["Tackle"],
-                        hoverinfo="text",
-                    )
-                )
-        else:
-            data.append(
-                go.Scatter(
-                    x=plot_df["x"],
-                    y=plot_df["y"],
-                    mode="markers",
-                    marker_color=colors[club],
-                    marker_size=10,
-                    name=club,
-                    hoverinfo="none",
-                )
-            )
 
+
+
+
+    
+    # Plot Players
+    for role in df_focused.player_role.unique():
+
+        plot_df = df_focused[
+            (df_focused.player_role == role) & (df_focused.frame_id == frameId)
+        ].copy()
+
+    
+        hover_text_array = []
+        for nflId in plot_df.nfl_id:
+            selected_player_df = plot_df[plot_df.nfl_id == nflId]
+            hover_text_array.append(
+                f"nflId:{selected_player_df['nfl_id'].values[0]}<br>displayName:{selected_player_df['player_name'].values[0]}"
+            )
+        data.append(
+            go.Scatter(
+                x=plot_df["x"],
+                y=plot_df["y"],
+                mode="markers",
+                marker_color=colors[role],
+                marker_size=10,
+                name=role,
+                hovertext=hover_text_array,
+                hoverinfo="text",
+            )
+        )
+
+
+        # Add orientation lines
+        line_length = 1.25
+
+        line_x = []
+        line_y = []
+        
+        for i in range(len(plot_df)):
+            
+            # Only add line if this specific player has orientation data
+            if pd.notna(plot_df["o"].iloc[i]):
+                x_end_val = plot_df["x"].iloc[i] + line_length * np.sin(np.radians(plot_df["o"].iloc[i]))
+                y_end_val = plot_df["y"].iloc[i] + line_length * np.cos(np.radians(plot_df["o"].iloc[i]))
+                
+                line_x.extend([plot_df["x"].iloc[i], x_end_val, None])
+                line_y.extend([plot_df["y"].iloc[i], y_end_val, None])
+        
+
+        data.append(
+            go.Scatter(
+                x=line_x,
+                y=line_y,
+                mode="lines",
+                line=dict(color=colors[role], width=2),
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+
+
+    # plot ball landing
+    data.append(
+            go.Scatter(
+                x=np.array(ball_land_x),
+                y=np.array(ball_land_y),
+                mode="markers",
+                marker_color='#895129',
+                marker_size=10,
+                name='Ball Land',
+                hovertext=['Ball!'],
+                hoverinfo="text",
+            )
+    )
+
+    if frameId == pass_frame_id:
+        data_history.append(data)
+        
     # add frame to slider
     slider_step = {
         "args": [
             [frameId],
             {
-                "frame": {"duration": 100, "redraw": False},
+                "frame": {"duration": 100, "redraw": True},
                 "mode": "immediate",
                 "transition": {"duration": 0},
             },
@@ -306,6 +342,7 @@ for frameId in sorted_frame_list:
     sliders_dict["steps"].append(slider_step)
     frames.append(go.Frame(data=data, name=str(frameId)))
 
+    
 scale = 10
 layout = go.Layout(
     autosize=False,
@@ -321,7 +358,7 @@ layout = go.Layout(
     yaxis=dict(range=[0, 53.3], autorange=False, showgrid=False, showticklabels=False),
     plot_bgcolor="#00B140",
     # Create title and add play description at the bottom of the chart for better visual appeal
-    title=f"GameId: {game_id}, PlayId: {play_id}<br>{game_clock} {quarter}Q, Tackled at Frame {tackle_frame_id}"
+    title=f"GameId: {game_id}, PlayId: {play_id}<br>{game_clock} {quarter}Q, Pass at Frame {pass_frame_id}"
     + "<br>" * 19
     + f"{play_description}",
     updatemenus=updatemenus_dict,
@@ -329,6 +366,34 @@ layout = go.Layout(
 )
 
 fig = go.Figure(data=frames[0]["data"], layout=layout, frames=frames[1:])
+fig.update_layout(
+    updatemenus=[{
+        "buttons": [
+            {
+                "args": [None, {"frame": {"duration": 100, "redraw": True},
+                               "fromcurrent": True, 
+                               "transition": {"duration": 0}}],
+                "label": "Play",
+                "method": "animate"
+            },
+            {
+                "args": [[None], {"frame": {"duration": 0, "redraw": True},
+                                 "mode": "immediate",
+                                 "transition": {"duration": 0}}],
+                "label": "Pause",
+                "method": "animate"
+            }
+        ],
+        "direction": "left",
+        "pad": {"r": 10, "t": 87},
+        "showactive": False,
+        "type": "buttons",
+        "x": 0.1,
+        "xanchor": "right",
+        "y": 0,
+        "yanchor": "top"
+    }]
+)
 
 # Create First Down Markers
 for y_val in [0, 53]:
@@ -346,4 +411,5 @@ for y_val in [0, 53]:
         opacity=1,
     )
 
-fig.show()
+
+    fig.show()
