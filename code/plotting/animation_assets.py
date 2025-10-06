@@ -45,3 +45,9 @@ colors = {
 
 }
 
+
+drop_list = ['penalty_yards',
+        'pre_penalty_yards_gained', 'yards_gained', 'expected_points',
+        'expected_points_added', 'pre_snap_home_team_win_probability',
+        'pre_snap_visitor_team_win_probability',
+        'home_team_win_probability_added', 'visitor_team_win_probility_added', 'play_nullified_by_penalty']
