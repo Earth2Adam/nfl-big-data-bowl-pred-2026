@@ -2,8 +2,6 @@
 Modified from Original Source: https://www.kaggle.com/code/huntingdata11/animated-and-interactive-nfl-plays-in-plotly/notebook
 
 Usage: python animate_play.py --game_id game_id --play_id play_id
-
-
 """
 
 import argparse
@@ -22,9 +20,7 @@ pio.renderers.default = (
 # command line args
 parser = argparse.ArgumentParser()
 
-parser.add_argument("--data_path", type=str, metavar="DIR", help="data directory", default='../../data')
-parser.add_argument("--input_file", type=str,  help="input data file", default='train/input_2023_w01.csv')
-parser.add_argument("--output_file", type=str,  help="output data file", default='train/output_2023_w01.csv')
+parser.add_argument("--data_path", type=str, metavar="DIR", help="data directory", default='../../data/')
 parser.add_argument("--supplementary_file", type=str,  help="supplementary data file", default='supplementary_data.csv')
 parser.add_argument("--game_id", type=int, default=2023090700)
 parser.add_argument("--play_id", type=int, default=101)
@@ -39,18 +35,21 @@ def main():
 
     data_path = (Path(__file__).parent / args.data_path).resolve()
 
-
-    input_data_file = data_path / args.input_file
-    output_data_file = data_path / args.output_file
+    input_list = data_path.glob("train/input*.csv")
+    output_list = data_path.glob("train/output*.csv")
     info_file = data_path / args.supplementary_file
+    
+    input_df_list = [pd.read_csv(f) for f in input_list]
+    output_df_list = [pd.read_csv(f) for f in output_list]
 
-    df_input = pd.read_csv(input_data_file)
-    df_output = pd.read_csv(output_data_file)
+    df_input = pd.concat(input_df_list, ignore_index=True)
+    df_output = pd.concat(output_df_list, ignore_index=True)
     df_plays = pd.read_csv(info_file)
 
+    print(f"Input Data Shape: {df_input.shape}, Output Data: {df_output.shape}, Supplementary Data: {df_plays.shape}")
 
-    df_input_merged = df_input.merge(df_plays, on=["game_id", "play_id"])
-    df_output_merged = df_output.merge(df_plays, on=["game_id", "play_id"])
+    df_input_merged = df_input.merge(df_plays, on=["game_id", "play_id"], how='left')
+    df_output_merged = df_output.merge(df_plays, on=["game_id", "play_id"], how='left')
 
 
     df_input_final = df_input_merged.drop(drop_list, axis=1)
@@ -67,6 +66,7 @@ def main():
     name_mapping = dict(zip(df_input_final["nfl_id"], df_input_final["player_name"]))
     df_output_final["player_name"] = df_output_final["nfl_id"].map(name_mapping)
 
+    print(f"Post-merge Input Data Shape: {df_input_final.shape}, Output Data: {df_output_final.shape}")
 
     df_input_focused = df_input_final[
         (df_input_final["play_id"] == args.play_id) & (df_input_final["game_id"] == args.game_id)
@@ -76,6 +76,7 @@ def main():
         (df_output_final["play_id"] == args.play_id) & (df_output_final["game_id"] == args.game_id)
     ]
 
+    print(f"Input Frames: {df_input_focused.frame_id.nunique()}, Output Frames: {df_output_focused.frame_id.nunique()}")
 
     # Concat the two dataframes - merge the two segments of the play into one
     pass_frame_id = df_input_focused['frame_id'].max() + 1
@@ -83,6 +84,7 @@ def main():
     df_focused = pd.concat([df_input_focused, df_output_focused], ignore_index=True)
 
 
+    print(f"Animating GameId: {args.game_id}, PlayId: {args.play_id}, Total Frames: {df_focused.frame_id.nunique()}, Pass at Frame: {pass_frame_id}")
     # Get General Play Information
     absolute_yd_line = df_focused.absolute_yardline_number.values[0]
     play_going_right = (
